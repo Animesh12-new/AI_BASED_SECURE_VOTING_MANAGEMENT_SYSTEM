@@ -1,0 +1,46 @@
+# =========================
+# 1. Node & JavaScript (Client & Server)
+# =========================
+node_modules/
+client/node_modules/
+server/node_modules/
+client/build/
+client/dist/
+
+# =========================
+# 2. Python & AI (Microservice)
+# =========================
+# Ignore Python virtual environments
+ai-service/venv/
+ai-service/.venv/
+ai-service/env/
+# Ignore compiled Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+# Ignore downloaded DeepFace model weights (They are too heavy for GitHub!)
+ai-service/.deepface/
+ai-service/weights/
+
+# =========================
+# 3. Environment Variables & Secrets
+# =========================
+.env
+client/.env
+server/.env
+ai-service/.env
+
+# =========================
+# 4. User Uploads (Security Critical)
+# =========================
+# Do NOT upload real Aadhaar cards or voter photos to public GitHub!
+server/uploads/
+
+# =========================
+# 5. Operating System Junk
+# =========================
+.DS_Store
+Thumbs.db
+
+
