@@ -1,0 +1,386 @@
+/* client/src/App.css - TOTAL REWRITE FOR MAXIMUM POLISH */
+
+/* --- 1. GLOBAL RESET & FOUNDATION --- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.App {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* --- 2. THE MODERN NAVIGATION BAR --- */
+.navbar {
+  background-color: rgba(255, 255, 255, 0.95); /* Semi-transparent white */
+  backdrop-filter: blur(5px); /* Modern 'glass' effect */
+  padding: 15px 50px;
+  position: sticky; /* Stays at the top when you scroll */
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  border-bottom: 1px solid #eaeaea;
+}
+
+.navbar-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.navbar-logo {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #1a1a1a;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navbar-links {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: #555;
+  font-weight: 500;
+  font-size: 1rem;
+  transition: color 0.2s;
+}
+
+.nav-link:hover {
+  color: #007bff;
+}
+
+.nav-link.register-btn {
+  background-color: #007bff;
+  color: white;
+  padding: 8px 20px;
+  border-radius: 5px;
+}
+
+.nav-link.register-btn:hover {
+  background-color: #0056b3;
+}
+
+/* --- 3. PAGE BACKGROUND LOGIC (Trust Blues) --- */
+.bg-home {
+  background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.bg-register {
+  background-color: #f4f7f6; /* Cool grey for focus */
+  min-height: calc(100vh - 75px); /* Fills rest of screen below navbar */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem;
+}
+
+.bg-login {
+  background-color: #e2e8f0; /* Darker grey for security context */
+  min-height: calc(100vh - 75px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem;
+}
+
+/* --- 4. HOME PAGE LAYOUT --- */
+.hero-section {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 100px 20px;
+}
+
+/* This is the welcome box, made more transparent and floating */
+.welcome-box {
+  background-color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  padding: 4rem;
+  border-radius: 20px;
+  box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+  text-align: center;
+  max-width: 650px;
+  width: 100%;
+}
+
+.welcome-box h1 {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  line-height: 1.2;
+}
+
+.welcome-box p {
+  font-size: 1.15rem;
+  color: #4a4a4a;
+  line-height: 1.6;
+  margin-bottom: 3rem;
+}
+
+.btn-primary-large {
+  display: inline-block;
+  background-color: #007bff;
+  color: white;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 1.1rem;
+  padding: 15px 40px;
+  border-radius: 8px;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.btn-primary-large:hover {
+  background-color: #0056b3;
+  transform: translateY(-3px);
+}
+
+/* --- 5. FEATURES/HOW IT WORKS SECTION --- */
+.features-section {
+  background-color: #fff;
+  padding: 100px 50px;
+  width: 100%;
+}
+
+.features-section h2 {
+  text-align: center;
+  font-size: 2.2rem;
+  margin-bottom: 70px;
+}
+
+.feature-grid {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 40px;
+}
+
+.feature-card {
+  background: #fff;
+  padding: 40px;
+  border-radius: 12px;
+  text-align: center;
+  border: 1px solid #f0f0f0;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.03);
+  transition: box-shadow 0.3s, transform 0.3s;
+}
+
+.feature-card:hover {
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  transform: translateY(-5px);
+}
+
+.icon-circle {
+  font-size: 2.5rem;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.icon-circle.blue { background-color: #e6f7ff; color: #1890ff; }
+.icon-circle.green { background-color: #f6ffed; color: #52c41a; }
+.icon-circle.orange { background-color: #fff7e6; color: #fa8c16; }
+
+.feature-card h3 {
+  font-size: 1.3rem;
+  margin-bottom: 15px;
+  color: #1a1a1a;
+}
+
+.feature-card p {
+  color: #666;
+  line-height: 1.6;
+}
+
+/* --- 6. REGULAR FORM CARDS (Register/Login) --- */
+.container {
+  background: white;
+  padding: 3rem;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+  width: 100%;
+  max-width: 480px;
+}
+
+h2 {
+  text-align: center;
+  color: #1a1a1a;
+  margin-bottom: 1.5rem;
+  font-size: 1.8rem;
+}
+
+.form-group {
+  margin-bottom: 1.2rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #4a4a4a;
+  font-weight: 600;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 14px;
+  border: 2px solid #e1e1e1;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  border-color: #007bff;
+  outline: none;
+}
+
+.upload-box {
+  border: 2px dashed #007bff;
+  background-color: #f8fbff;
+  border-radius: 10px;
+  padding: 2.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-box:hover {
+  background-color: #e6f0ff;
+  transform: translateY(-2px);
+}
+
+.upload-label {
+  cursor: pointer;
+  color: #007bff;
+  font-weight: bold;
+}
+
+.btn-primary, .btn-secondary {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: background 0.2s;
+}
+
+.btn-primary { background-color: #007bff; color: white; }
+.btn-primary:hover { background-color: #0056b3; }
+.btn-secondary { background-color: #e4e6eb; color: #050505; }
+.btn-secondary:hover { background-color: #d8dadf; }
+
+/* --- 7. FOOTER --- */
+.footer-modern {
+  text-align: center;
+  padding: 40px;
+  background-color: #fafafa;
+  border-top: 1px solid #f0f0f0;
+  color: #888;
+  font-size: 0.9rem;
+  width: 100%;
+}
+/* --- 8. DASHBOARD STYLES --- */
+.dashboard-container {
+  background: white;
+  padding: 3rem;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+}
+
+.admin-toggle-bar {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 30px;
+  font-size: 0.9rem;
+  border: 1px solid #ffeeba;
+}
+
+.toggle-label {
+  cursor: pointer;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.status-box {
+  padding: 40px 20px;
+  border-radius: 12px;
+  margin-top: 20px;
+  border: 2px solid transparent;
+  transition: all 0.3s;
+}
+
+.live-box {
+  background-color: #f6ffed;
+  border-color: #b7eb8f;
+}
+
+.offline-box {
+  background-color: #f5f5f5;
+  border-color: #d9d9d9;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 6px 15px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  margin-bottom: 20px;
+}
+
+.live-badge {
+  background-color: #fff1f0;
+  color: #f5222d;
+  border: 1px solid #ffa39e;
+  animation: pulse 2s infinite; /* Little blinking animation */
+}
+
+.offline-badge {
+  background-color: #fafafa;
+  color: #595959;
+  border: 1px solid #d9d9d9;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(245, 34, 45, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(245, 34, 45, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 34, 45, 0); }
+}
