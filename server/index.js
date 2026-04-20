@@ -10,6 +10,7 @@ const Candidate = require('./models/Candidate');
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static('uploads')); // <-- NEW: Allows the server to read the saved ID photos
 
 // --- MONGODB CONNECTION ---
 mongoose.connect('mongodb://127.0.0.1:27017/voting_system')
@@ -75,7 +76,7 @@ app.post('/api/register', upload.single('aadhaarImage'), async (req, res) => {
     }
 });
 // --- NORMAL VOTER LOGIN ---
-app.post('/api/login', async (req, res) => {
+/*app.post('/api/login', async (req, res) => {
     try {
         const { aadhaarNumber, password } = req.body;
         
@@ -97,6 +98,39 @@ app.post('/api/login', async (req, res) => {
                 aadhaarNumber: user.aadhaarNumber,
                 hasVoted: user.hasVoted,
                 role: user.role || 'voter'
+            } 
+        });
+
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).json({ message: "Server error during login" });
+    }
+});*/
+// --- NORMAL VOTER LOGIN ---
+app.post('/api/login', async (req, res) => {
+    try {
+        const { aadhaarNumber, password } = req.body;
+        
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) {
+            return res.status(404).json({ message: "Voter not found. Please register." });
+        }
+
+        if (user.password !== password) {
+            return res.status(400).json({ message: "Incorrect password." });
+        }
+
+        // Send success signal ALONG WITH THE SAVED IMAGE PATH
+        console.log(`✅ Voter logged in: ${user.name} as ${user.role || 'voter'}`);
+        res.status(200).json({ 
+            message: "Login successful! Proceed to face verification.", 
+            user: { 
+                name: user.name, 
+                aadhaarNumber: user.aadhaarNumber,
+                hasVoted: user.hasVoted,
+                role: user.role || 'voter',
+                // NEW: Send the image path back to React so it can do the Face Match!
+                imagePath: user.imagePath 
             } 
         });
 
