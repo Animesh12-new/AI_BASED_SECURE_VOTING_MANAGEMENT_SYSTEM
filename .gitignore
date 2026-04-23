@@ -44,3 +44,10 @@ server/uploads/
 Thumbs.db
 
 
+# =========================
+# 6. Temporary AI Files & Local Models
+# =========================
+*.h5
+ai-service/temp_id.jpg
+ai-service/temp_webcam.jpg
+

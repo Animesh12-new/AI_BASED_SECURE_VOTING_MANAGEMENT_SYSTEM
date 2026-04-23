@@ -1,16 +1,171 @@
 // server/index.js
+require('dotenv').config();
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const Settings = require('./models/Settings');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const mongoose = require('mongoose');
-const User = require('./models/User'); // <-- 1. Import your new Blueprint!
+const User = require('./models/User'); 
 const Candidate = require('./models/Candidate');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static('uploads')); // <-- NEW: Allows the server to read the saved ID photos
+app.use('/uploads', express.static('uploads')); 
+
+// --- SET UP THE EMAIL POSTMAN ---
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER, 
+        pass: process.env.EMAIL_PASS  
+    }
+});
+
+// --- STEP 1: LOGIN & SEND OTP ---
+app.post('/api/login', async (req, res) => {
+    try {
+        const { aadhaarNumber, password } = req.body;
+        
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user || user.password !== password) {
+            return res.status(400).json({ message: "Invalid Aadhaar Number or Password." });
+        }
+
+        // Generate a random 6-digit OTP
+        const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Save OTP to database, set to expire in 5 minutes
+        user.otp = generatedOTP;
+        user.otpExpires = Date.now() + 5 * 60 * 1000; 
+        await user.save();
+
+        // Send the email
+        const mailOptions = {
+            from: 'your-email@gmail.com',
+            to: user.email,
+            subject: 'Your Voting System Security Code',
+            text: `Hello ${user.name}, your OTP for login is: ${generatedOTP}. It is valid for 5 minutes.`
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.status(200).json({ message: "OTP sent to your registered email!" });
+
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).json({ message: "Server error during login" });
+    }
+});
+
+// --- STEP 2: VERIFY OTP ---
+app.post('/api/verify-otp', async (req, res) => {
+    try {
+        const { aadhaarNumber, otp } = req.body;
+
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) return res.status(404).json({ message: "User not found." });
+
+        // Security Checks
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: "Invalid OTP." });
+        }
+        if (user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: "OTP has expired. Please log in again." });
+        }
+
+        // OTP is valid! Clear it from the database for security
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        res.status(200).json({ 
+            message: "Login successful!", 
+            user: { 
+                name: user.name, 
+                aadhaarNumber: user.aadhaarNumber,
+                hasVoted: user.hasVoted,
+                role: user.role || 'voter',
+                imagePath: user.imagePath // <-- ADDED: Send the image path back to React so it can do the Face Match!
+            } 
+        });
+
+    } catch (error) {
+        console.error("OTP Verification Error:", error);
+        res.status(500).json({ message: "Server error during verification" });
+    }
+});
+
+// --- FORGOT PASSWORD - STEP 1: SEND OTP ---
+app.post('/api/forgot-password', async (req, res) => {
+    try {
+        const { aadhaarNumber } = req.body;
+        
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) {
+            return res.status(404).json({ message: "No account found with this ID." });
+        }
+
+        // Generate a new 6-digit OTP
+        const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = generatedOTP;
+        user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes to reset
+        await user.save();
+
+        // Send the recovery email
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'Password Reset Request - Voting System',
+            text: `Hello ${user.name},\n\nYou requested a password reset. Your secret OTP is: ${generatedOTP}\nIt is valid for 10 minutes.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Password reset OTP sent to your registered email!" });
+
+    } catch (error) {
+        console.error("Forgot Password Error:", error);
+        res.status(500).json({ message: "Server error." });
+    }
+});
+
+// --- FORGOT PASSWORD - STEP 2: VERIFY & RESET ---
+app.post('/api/reset-password', async (req, res) => {
+    try {
+        const { aadhaarNumber, otp, newPassword } = req.body;
+
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) return res.status(404).json({ message: "User not found." });
+
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: "Invalid OTP." });
+        }
+        if (user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: "OTP has expired. Request a new one." });
+        }
+
+        // Security Check: Make sure the new password meets your requirements
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+        if (!passwordRegex.test(newPassword)) {
+            return res.status(400).json({ message: "Password is too weak." });
+        }
+
+        // Update the password and clear the OTP
+        user.password = newPassword;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        res.status(200).json({ message: "Password successfully reset! You can now log in." });
+
+    } catch (error) {
+        console.error("Reset Password Error:", error);
+        res.status(500).json({ message: "Server error." });
+    }
+});
 
 // --- MONGODB CONNECTION ---
 mongoose.connect('mongodb://127.0.0.1:27017/voting_system')
@@ -40,8 +195,8 @@ const upload = multer({ dest: 'uploads/' });
 // --- NEW MVP REGISTRATION ROUTE ---
 app.post('/api/register', upload.single('aadhaarImage'), async (req, res) => {
     try {
-        // 1. Grab the text data from the envelope
-        const { name, aadhaarNumber, dob, password } = req.body;
+        // 1. Grab the text data from the envelope (ADDED EMAIL HERE!)
+        const { name, aadhaarNumber, dob, password, email } = req.body; 
         
         // 2. Check if an image was uploaded
         if (!req.file) {
@@ -60,7 +215,8 @@ app.post('/api/register', upload.single('aadhaarImage'), async (req, res) => {
             name,
             aadhaarNumber,
             dob,
-            password, // Note: In a production app, we would hash this password first!
+            password, 
+            email, // <-- Save the email to the database!
             imagePath
         });
 
@@ -75,70 +231,7 @@ app.post('/api/register', upload.single('aadhaarImage'), async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 });
-// --- NORMAL VOTER LOGIN ---
-/*app.post('/api/login', async (req, res) => {
-    try {
-        const { aadhaarNumber, password } = req.body;
-        
-        const user = await User.findOne({ aadhaarNumber });
-        if (!user) {
-            return res.status(404).json({ message: "Voter not found. Please register." });
-        }
 
-        if (user.password !== password) {
-            return res.status(400).json({ message: "Incorrect password." });
-        }
-
-        // Send success signal
-        console.log(`✅ Voter logged in: ${user.name} as ${user.role || 'voter'}`);
-        res.status(200).json({ 
-            message: "Login successful!", 
-            user: { 
-                name: user.name, 
-                aadhaarNumber: user.aadhaarNumber,
-                hasVoted: user.hasVoted,
-                role: user.role || 'voter'
-            } 
-        });
-
-    } catch (error) {
-        console.error("Login Error:", error);
-        res.status(500).json({ message: "Server error during login" });
-    }
-});*/
-// --- NORMAL VOTER LOGIN ---
-app.post('/api/login', async (req, res) => {
-    try {
-        const { aadhaarNumber, password } = req.body;
-        
-        const user = await User.findOne({ aadhaarNumber });
-        if (!user) {
-            return res.status(404).json({ message: "Voter not found. Please register." });
-        }
-
-        if (user.password !== password) {
-            return res.status(400).json({ message: "Incorrect password." });
-        }
-
-        // Send success signal ALONG WITH THE SAVED IMAGE PATH
-        console.log(`✅ Voter logged in: ${user.name} as ${user.role || 'voter'}`);
-        res.status(200).json({ 
-            message: "Login successful! Proceed to face verification.", 
-            user: { 
-                name: user.name, 
-                aadhaarNumber: user.aadhaarNumber,
-                hasVoted: user.hasVoted,
-                role: user.role || 'voter',
-                // NEW: Send the image path back to React so it can do the Face Match!
-                imagePath: user.imagePath 
-            } 
-        });
-
-    } catch (error) {
-        console.error("Login Error:", error);
-        res.status(500).json({ message: "Server error during login" });
-    }
-});
 // --- NEW MVP LOGIN ROUTE ---
 app.post('/api/admin/login', async (req, res) => {
 try {
@@ -275,7 +368,43 @@ try {
     }
 });
 
+// --- AI ELECTION CHATBOT ROUTE ---
+app.post('/api/chat', async (req, res) => {
+    try {
+        const { userMessage } = req.body;
+
+        // The Master Rulebook for your AI
+        const systemPrompt = `
+        You are the official AI Assistant for the "AI-Based Secure Voting Management System". 
+        Your job is to help users understand how to vote and provide info about the candidates.
+        Keep your answers short, friendly, and highly accurate. Do NOT invent information.
+
+        SYSTEM FACTS:
+        - This voting system is unique because it uses 3-Factor Authentication: Password, Email OTP, and Live Facial Recognition to completely eliminate voter fraud.
+        - To vote: Users must log in, pass the face scan, go to the Dashboard, select a candidate, and click "Cast Vote". A user can only vote once.
+        
+        CANDIDATE FACTS:
+        1. Arjun Sharma (Progressive Alliance): Holds a Master's in Economics. Focuses on tech innovation and job creation for youth.
+        2. Priya Patel (Democratic Front): Former human rights lawyer. Focuses on healthcare reform and equal education opportunities.
+        3. Rahul Verma (Independent): Retired military officer. Focuses on national security and infrastructure development.
+        
+        User Question: ${userMessage}
+        `;
+
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const result = await model.generateContent(systemPrompt);
+        const text = result.response.text();
+
+        res.status(200).json({ reply: text });
+
+    } catch (error) {
+        console.error("Chatbot Error:", error);
+        res.status(500).json({ reply: "Sorry, the AI Assistant is currently offline." });
+    }
+});
+
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
+

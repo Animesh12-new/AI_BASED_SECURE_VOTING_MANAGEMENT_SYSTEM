@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import axios from 'axios'; 
 import Tesseract from 'tesseract.js';
-import Webcam from 'react-webcam'; // NEW: Imported Webcam
+import Webcam from 'react-webcam'; 
 
 function Register() {
   const [formData, setFormData] = useState({
@@ -10,6 +10,7 @@ function Register() {
     aadhaarNumber: '',
     dob: '',
     password: '', 
+    email: '', // <-- NEW 1: Added email to the initial state
     image: null
   });
 
@@ -17,7 +18,6 @@ function Register() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
 
-  // --- NEW STATE FOR FACIAL RECOGNITION ---
   const [showWebcam, setShowWebcam] = useState(false);
   const [webcamImage, setWebcamImage] = useState(null);
   const [isVerifyingFace, setIsVerifyingFace] = useState(false);
@@ -103,14 +103,12 @@ function Register() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // --- NEW: CAPTURE WEBCAM PHOTO ---
   const captureSelfie = useCallback(() => {
     const imageSrc = webcamRef.current.getScreenshot();
     setWebcamImage(imageSrc);
-    setShowWebcam(false); // Turn off camera after taking pic
+    setShowWebcam(false); 
   }, [webcamRef]);
 
-  // --- NEW: HELPER TO CONVERT BASE64 IMAGE TO BLOB FOR SERVER ---
   const dataURLtoBlob = (dataurl) => {
     let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
         bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
@@ -120,7 +118,6 @@ function Register() {
     return new Blob([u8arr], {type:mime});
   }
 
-  // --- NEW: SEND BOTH IMAGES TO PYTHON AI SERVER ---
   const handleFaceVerification = async () => {
     if (!formData.image || !webcamImage) {
       alert("Please upload your ID and take a selfie first.");
@@ -129,7 +126,6 @@ function Register() {
 
     setIsVerifyingFace(true);
 
-    // Package the files to send to Python
     const aiFormData = new FormData();
     aiFormData.append('id_image', formData.image); 
     aiFormData.append('webcam_image', dataURLtoBlob(webcamImage), 'selfie.jpg');
@@ -144,7 +140,6 @@ function Register() {
         alert(`✅ Face Match Confirmed! (Distance: ${res.data.distance.toFixed(2)})`);
       } else {
         setFaceVerified(false);
-        // NEW: Smarter error handling
         if (res.data.error_type === "NO_FACE_FOUND") {
              alert("🛑 No face detected! Please ensure your face is fully visible in the camera and the ID card is clear.");
         } else {
@@ -163,7 +158,6 @@ function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // --- NEW: BLOCK SUBMISSION IF FACE ISN'T VERIFIED ---
     if (!faceVerified) {
       alert("🛑 Security Error: You must pass AI Face Verification before registering.");
       return;
@@ -171,7 +165,7 @@ function Register() {
 
     const aadhaarRegex = /^\d{12}$/;
     if (!aadhaarRegex.test(formData.aadhaarNumber)) {
-      alert("❌ Invalid Input: Aadhaar Number must be exactly 12 digits.");
+      alert("❌ Invalid Input: ID Number must be exactly 12 digits.");
       return; 
     }
 
@@ -200,6 +194,7 @@ function Register() {
     dataToSend.append('aadhaarNumber', formData.aadhaarNumber);
     dataToSend.append('dob', formData.dob);
     dataToSend.append('password', formData.password);
+    dataToSend.append('email', formData.email); // <-- NEW 2: Append email to send to backend
     dataToSend.append('aadhaarImage', formData.image); 
 
     try {
@@ -245,7 +240,6 @@ function Register() {
             </div>
           </div>
 
-          {/* --- NEW WEBCAM SECTION --- */}
           <div className="form-group">
             <label>2. Live Face Verification</label>
             
@@ -279,7 +273,6 @@ function Register() {
               </div>
             )}
 
-            {/* AI Verification Button */}
             {preview && webcamImage && !faceVerified && (
               <button 
                 type="button" 
@@ -299,14 +292,19 @@ function Register() {
           </div>
           <hr style={{ margin: '20px 0', borderColor: '#eee' }} />
 
-          {/* Existing Form Inputs */}
           <div className="form-group">
             <label>Full Name</label>
             <input type="text" name="name" placeholder="Your Name" required value={formData.name} onChange={handleInputChange} />
           </div>
 
+          {/* NEW 3: Added Email Input Field */}
           <div className="form-group">
-            <label>Aadhaar Number</label>
+            <label>Email Address</label>
+            <input type="email" name="email" placeholder="Your actual email (for OTP)" required value={formData.email} onChange={handleInputChange} />
+          </div>
+
+          <div className="form-group">
+            <label>ID Number</label>
             <input type="text" name="aadhaarNumber" placeholder="XXXX-XXXX-XXXX" required value={formData.aadhaarNumber} onChange={handleInputChange} />
           </div>
 
