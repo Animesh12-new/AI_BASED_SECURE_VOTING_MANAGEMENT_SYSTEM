@@ -33,7 +33,7 @@ function Home() {
           <div className="feature-card">
             <div className="icon-circle green">🧑‍💻</div>
             <h3>2. Face ID Check</h3>
-            <p>Snap a quick selfie. Our advanced algorithms match you to your ID.</p>
+            <p>Snap a high-resolution selfie. This becomes your secure biometric key for all future voting sessions.</p>
           </div>
 
           <div className="feature-card">

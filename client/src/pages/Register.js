@@ -10,7 +10,7 @@ function Register() {
     aadhaarNumber: '',
     dob: '',
     password: '', 
-    email: '', // <-- NEW 1: Added email to the initial state
+    email: '', 
     image: null
   });
 
@@ -20,8 +20,6 @@ function Register() {
 
   const [showWebcam, setShowWebcam] = useState(false);
   const [webcamImage, setWebcamImage] = useState(null);
-  const [isVerifyingFace, setIsVerifyingFace] = useState(false);
-  const [faceVerified, setFaceVerified] = useState(false);
   const webcamRef = useRef(null);
 
   const handleImageUpload = async (e) => {
@@ -47,15 +45,12 @@ function Register() {
         );
 
         const extractedText = result.data.text;
-        console.log("Raw Text Extracted by AI:\n", extractedText);
-
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
         let extractedName = "";
 
         for (let i = 0; i < lines.length; i++) {
           const currentLine = lines[i];
-          // eslint-disable-next-line no-useless-escape
-          if (currentLine.match(/\d{2}[\/\-]\d{2}[\/\-]\d{4}/) || currentLine.toUpperCase().includes("DOB")) {
+          if (currentLine.match(/\d{2}[/-]\d{2}[/-]\d{4}/) || currentLine.toUpperCase().includes("DOB")) {
             if (i > 0) {
               let possibleName = lines[i - 1];
               if (/[a-zA-Z]/.test(possibleName) && !possibleName.toLowerCase().includes("government")) {
@@ -71,12 +66,10 @@ function Register() {
 
         const aadhaarRegex = /\b(\d{4})[\s-]?(\d{4})[\s-]?(\d{4})\b/;
         const aadhaarMatch = extractedText.match(aadhaarRegex);
-
         const dobRegex = /\b(\d{2})\/(\d{2})\/(\d{4})\b/;
         const dobMatch = extractedText.match(dobRegex);
 
         let updatedData = { ...formData, image: file };
-
         if (extractedName) updatedData.name = extractedName;
         if (aadhaarMatch) updatedData.aadhaarNumber = aadhaarMatch[1] + aadhaarMatch[2] + aadhaarMatch[3];
         if (dobMatch) updatedData.dob = `${dobMatch[3]}-${dobMatch[2]}-${dobMatch[1]}`;
@@ -118,49 +111,12 @@ function Register() {
     return new Blob([u8arr], {type:mime});
   }
 
-  const handleFaceVerification = async () => {
-    if (!formData.image || !webcamImage) {
-      alert("Please upload your ID and take a selfie first.");
-      return;
-    }
-
-    setIsVerifyingFace(true);
-
-    const aiFormData = new FormData();
-    aiFormData.append('id_image', formData.image); 
-    aiFormData.append('webcam_image', dataURLtoBlob(webcamImage), 'selfie.jpg');
-
-    try {
-      const res = await axios.post('http://127.0.0.1:8000/verify', aiFormData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-
-      if (res.data.is_match) {
-        setFaceVerified(true);
-        alert(`✅ Face Match Confirmed! (Distance: ${res.data.distance.toFixed(2)})`);
-      } else {
-        setFaceVerified(false);
-        if (res.data.error_type === "NO_FACE_FOUND") {
-             alert("🛑 No face detected! Please ensure your face is fully visible in the camera and the ID card is clear.");
-        } else {
-             alert("❌ Face Mismatch! The person in the camera does not match the ID card.");
-        }
-        setWebcamImage(null); 
-      }
-    } catch (error) {
-      console.error("AI Server Error:", error);
-      alert("AI Verification failed. Make sure your Python server is running.");
-    } finally {
-      setIsVerifyingFace(false);
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!faceVerified) {
-      alert("🛑 Security Error: You must pass AI Face Verification before registering.");
-      return;
+    if (!webcamImage) {
+        alert("🛑 Security Error: You must capture a live face scan to register.");
+        return;
     }
 
     const aadhaarRegex = /^\d{12}$/;
@@ -194,8 +150,10 @@ function Register() {
     dataToSend.append('aadhaarNumber', formData.aadhaarNumber);
     dataToSend.append('dob', formData.dob);
     dataToSend.append('password', formData.password);
-    dataToSend.append('email', formData.email); // <-- NEW 2: Append email to send to backend
-    dataToSend.append('aadhaarImage', formData.image); 
+    dataToSend.append('email', formData.email); 
+    
+    // 🔥 PIVOT: Sending the high-quality webcam selfie as the primary biometric record
+    dataToSend.append('registrationFace', dataURLtoBlob(webcamImage), 'golden_face.jpg'); 
 
     try {
       const res = await axios.post('http://localhost:5000/api/register', dataToSend, {
@@ -211,7 +169,7 @@ function Register() {
   return (
     <div className="bg-register">
       <div className="container">
-        <h2>🗳️ Voter Registration</h2>
+        <h2>Voter Registration</h2>
         <form onSubmit={handleSubmit}>
           
           <div className="form-group">
@@ -241,7 +199,7 @@ function Register() {
           </div>
 
           <div className="form-group">
-            <label>2. Live Face Verification</label>
+            <label>2. Live Face Capture (For Biometric ID)</label>
             
             {!showWebcam && !webcamImage && (
               <button type="button" onClick={() => setShowWebcam(true)} style={{ padding: '8px 12px', background: '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
@@ -259,7 +217,7 @@ function Register() {
                   style={{ borderRadius: '8px', border: '2px solid #ccc' }}
                 />
                 <button type="button" onClick={captureSelfie} style={{ marginTop: '10px', padding: '8px 16px', background: 'green', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  📸 Capture Selfie
+                  📸 Capture Registration Selfie
                 </button>
               </div>
             )}
@@ -267,29 +225,13 @@ function Register() {
             {webcamImage && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '10px' }}>
                 <img src={webcamImage} alt="Selfie" style={{ width: '150px', borderRadius: '8px', border: '2px solid #4CAF50' }} />
-                <button type="button" onClick={() => { setWebcamImage(null); setShowWebcam(true); setFaceVerified(false); }} style={{ marginTop: '5px', padding: '5px 10px', background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                <button type="button" onClick={() => { setWebcamImage(null); setShowWebcam(true); }} style={{ marginTop: '5px', padding: '5px 10px', background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                   Retake Photo
                 </button>
               </div>
             )}
-
-            {preview && webcamImage && !faceVerified && (
-              <button 
-                type="button" 
-                onClick={handleFaceVerification} 
-                disabled={isVerifyingFace}
-                style={{ width: '100%', marginTop: '15px', padding: '10px', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                {isVerifyingFace ? '🧠 AI Comparing Faces...' : '✅ Verify Match'}
-              </button>
-            )}
-
-            {faceVerified && (
-              <div style={{ marginTop: '10px', padding: '10px', background: '#d4edda', color: '#155724', borderRadius: '4px', textAlign: 'center', fontWeight: 'bold' }}>
-                Identity Verified! Proceed to register.
-              </div>
-            )}
           </div>
+
           <hr style={{ margin: '20px 0', borderColor: '#eee' }} />
 
           <div className="form-group">
@@ -297,7 +239,6 @@ function Register() {
             <input type="text" name="name" placeholder="Your Name" required value={formData.name} onChange={handleInputChange} />
           </div>
 
-          {/* NEW 3: Added Email Input Field */}
           <div className="form-group">
             <label>Email Address</label>
             <input type="email" name="email" placeholder="Your actual email (for OTP)" required value={formData.email} onChange={handleInputChange} />
@@ -318,7 +259,7 @@ function Register() {
             <input type="password" name="password" placeholder="Create a secure password" required value={formData.password} onChange={handleInputChange} />
           </div>
 
-          <button type="submit" className="btn-primary" disabled={isScanning || !faceVerified}>
+          <button type="submit" className="btn-primary" disabled={isScanning || !webcamImage}>
             {isScanning ? 'AI Processing...' : 'Register Voter'}
           </button>
         </form>

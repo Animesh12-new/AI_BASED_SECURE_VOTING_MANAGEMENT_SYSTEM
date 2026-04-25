@@ -193,14 +193,14 @@ const candidateCount = await Candidate.countDocuments();
 const upload = multer({ dest: 'uploads/' });
 
 // --- NEW MVP REGISTRATION ROUTE ---
-app.post('/api/register', upload.single('aadhaarImage'), async (req, res) => {
+app.post('/api/register', upload.single('registrationFace'), async (req, res) => {
     try {
         // 1. Grab the text data from the envelope (ADDED EMAIL HERE!)
         const { name, aadhaarNumber, dob, password, email } = req.body; 
         
         // 2. Check if an image was uploaded
         if (!req.file) {
-            return res.status(400).json({ message: "Aadhaar image is required." });
+            return res.status(400).json({ message: "Live registration face capture is required." });
         }
         const imagePath = req.file.path;
 
