@@ -35,7 +35,10 @@ ai-service/.env
 # 4. User Uploads (Security Critical)
 # =========================
 # Do NOT upload real Aadhaar cards or voter photos to public GitHub!
-server/uploads/
+server/uploads/*
+
+# BUT DO NOT ignore the .gitkeep file (the exclamation mark means "not")
+!server/uploads/.gitkeep
 
 # =========================
 # 5. Operating System Junk

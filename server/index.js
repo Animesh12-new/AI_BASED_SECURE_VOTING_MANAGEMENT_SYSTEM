@@ -1,5 +1,6 @@
 // server/index.js
 require('dotenv').config();
+const bcrypt = require('bcryptjs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const Settings = require('./models/Settings');
@@ -27,6 +28,47 @@ const transporter = nodemailer.createTransport({
 
 // --- STEP 1: LOGIN & SEND OTP ---
 app.post('/api/login', async (req, res) => {
+    try {
+        const { aadhaarNumber, password } = req.body;
+        
+        // 1. Find the user by ID
+        const user = await User.findOne({ aadhaarNumber });
+        
+        // 2. If user doesn't exist, stop here
+        if (!user) {
+            return res.status(400).json({ message: "Invalid Aadhaar Number or Password." });
+        }
+
+        // 3. BCRYPT CHECK: Compare the entered password with the hashed password in DB
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid Aadhaar Number or Password." });
+        }
+
+        // 4. If password is correct, generate the OTP
+        const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        user.otp = generatedOTP;
+        user.otpExpires = Date.now() + 5 * 60 * 1000; 
+        await user.save();
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER, // Using env variable is safer
+            to: user.email,
+            subject: 'Your Voting System Security Code',
+            text: `Hello ${user.name}, your OTP for login is: ${generatedOTP}. It is valid for 5 minutes.`
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.status(200).json({ message: "OTP sent to your registered email!" });
+
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).json({ message: "Server error during login" });
+    }
+});
+/*app.post('/api/login', async (req, res) => {
     try {
         const { aadhaarNumber, password } = req.body;
         
@@ -58,6 +100,38 @@ app.post('/api/login', async (req, res) => {
     } catch (error) {
         console.error("Login Error:", error);
         res.status(500).json({ message: "Server error during login" });
+    }
+});*/
+// --- RESEND OTP ROUTE ---
+app.post('/api/resend-otp', async (req, res) => {
+    try {
+        const { aadhaarNumber } = req.body;
+
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) return res.status(404).json({ message: "User not found." });
+
+        // 1. Generate a fresh 6-digit OTP
+        const newOTP = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // 2. Update the database with the new OTP and reset the 5-minute timer
+        user.otp = newOTP;
+        user.otpExpires = Date.now() + 5 * 60 * 1000; 
+        await user.save();
+
+        // 3. Send the new email
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'NEW Security Code - Voting System',
+            text: `Your new OTP for login is: ${newOTP}. This replaces any previous code.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "A new OTP has been sent to your email!" });
+
+    } catch (error) {
+        console.error("Resend OTP Error:", error);
+        res.status(500).json({ message: "Failed to resend OTP." });
     }
 });
 
@@ -210,12 +284,17 @@ app.post('/api/register', upload.single('registrationFace'), async (req, res) =>
             return res.status(400).json({ message: "A voter with this Aadhaar Number is already registered!" });
         }
 
+        // --- BCRYPT ENCRYPTION START ---
+        const salt = await bcrypt.genSalt(10); // Create a 'Salt' (randomness)
+        const hashedPassword = await bcrypt.hash(password, salt); // Scramble the password
+        // --- BCRYPT ENCRYPTION END ---
+
         // 4. Create a new User using your schema
         const newVoter = new User({
             name,
             aadhaarNumber,
             dob,
-            password, 
+            password: hashedPassword, 
             email, // <-- Save the email to the database!
             imagePath
         });
@@ -233,6 +312,82 @@ app.post('/api/register', upload.single('registrationFace'), async (req, res) =>
 });
 
 // --- NEW MVP LOGIN ROUTE ---
+app.post('/api/admin/login', async (req, res) => {
+    try {
+        const { aadhaarNumber, password } = req.body;
+
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user || user.role !== 'admin') {
+            return res.status(401).json({ message: "Invalid Admin Credentials." });
+        }
+
+        // 1. Check Password (Bcrypt)
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ message: "Invalid Admin Credentials." });
+        }
+
+        // 2. Generate Admin OTP
+        const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = generatedOTP;
+        user.otpExpires = Date.now() + 5 * 60 * 1000; 
+        await user.save();
+
+        // 3. Send Admin Email
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: '👑 ADMIN ACCESS CODE',
+            text: `Admin Security Code: ${generatedOTP}. Do not share this with anyone.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Admin OTP sent to registered email!" });
+
+    } catch (error) {
+        console.error("Admin Login Error:", error);
+        res.status(500).json({ message: "Server error during admin login." });
+    }
+});
+/*app.post('/api/admin/login', async (req, res) => {
+    try {
+        const { aadhaarNumber, password } = req.body;
+
+        // 1. Find the user
+        const user = await User.findOne({ aadhaarNumber });
+        if (!user) {
+            return res.status(404).json({ message: "Account not found." });
+        }
+
+        // 2. BCRYPT CHECK: Compare entered password with hashed password in DB
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid credentials." });
+        }
+
+        // 3. THE BOUNCER: Check if they are actually an Admin!
+        if (user.role !== 'admin') {
+            console.log(`❌ Unauthorized admin access attempt by: ${user.name}`);
+            return res.status(403).json({ message: "Access Denied: You do not have Admin privileges." });
+        }
+
+        // 4. Success!
+        console.log(`👑 ADMIN logged in: ${user.name}`);
+        res.status(200).json({ 
+            message: "Admin login successful!", 
+            user: { 
+                name: user.name, 
+                aadhaarNumber: user.aadhaarNumber,
+                role: user.role
+            } 
+        });
+
+    } catch (error) {
+        console.error("Admin Login Error:", error);
+        res.status(500).json({ message: "Server error during admin login" });
+    }
+});
+/*
 app.post('/api/admin/login', async (req, res) => {
 try {
 const { aadhaarNumber, password } = req.body;
@@ -270,7 +425,7 @@ const { aadhaarNumber, password } = req.body;
     res.status(500).json({ message: "Server error during admin login" });
 }
 });
-
+*/
 // --- GET ALL CANDIDATES ROUTE ---
 app.get('/api/candidates', async (req, res) => {
     try {
