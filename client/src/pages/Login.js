@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios'; 
 import Webcam from 'react-webcam'; 
@@ -7,7 +7,7 @@ function Login() {
   const navigate = useNavigate();
   
   // --- STATE MANAGEMENT ---
-  const [resendTimer, setResendTimer] = useState(0); // Timer state for cooldown
+  const [resendTimer, setResendTimer] = useState(0);
   const [step, setStep] = useState(1); 
   const [userData, setUserData] = useState(null); 
   const [credentials, setCredentials] = useState({
@@ -24,23 +24,110 @@ function Login() {
   const [showWebcam, setShowWebcam] = useState(true);
   const [webcamImage, setWebcamImage] = useState(null);
   const [isVerifyingFace, setIsVerifyingFace] = useState(false);
+  const [livenessStatus, setLivenessStatus] = useState(''); // Added for UI feedback
   const webcamRef = useRef(null);
+
+  // --- HELPER: DATA URL TO BLOB ---
+  const dataURLtoBlob = (dataurl) => {
+    let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+    return new Blob([u8arr], {type:mime});
+  };
 
   const handleInputChange = (e) => {
     setCredentials({ ...credentials, [e.target.name]: e.target.value });
   };
 
-  // ==========================================
-  //         RESEND OTP LOGIC (SHARED)
-  // ==========================================
+  // --- UPDATED NATIVE LIVENESS LOGIC (NO BLINK NEEDED) ---
+  const captureLivenessBurst = async () => {
+    setIsVerifyingFace(true);
+    setLivenessStatus('🔍 Initializing Secure Scan...');
+    const frames = [];
+    
+    // Capture 5 frames quickly for CNN texture analysis
+    for (let i = 0; i < 5; i++) {
+      const imageSrc = webcamRef.current.getScreenshot();
+      if (imageSrc) {
+        const blob = dataURLtoBlob(imageSrc);
+        frames.push(blob); 
+      }
+      await new Promise(resolve => setTimeout(resolve, 150)); 
+    }
+
+    const formData = new FormData();
+    frames.forEach((frame, index) => {
+      formData.append('files', frame, `frame_${index}.jpg`);
+    });
+
+    try {
+      // Hits the updated Python server logic
+      const livenessRes = await axios.post('http://127.0.0.1:8000/verify-liveness', formData);
+
+      if (livenessRes.data.is_live) {
+        const finalImage = webcamRef.current.getScreenshot();
+        setWebcamImage(finalImage);
+        setShowWebcam(false);
+        setLivenessStatus('✅ Liveness Confirmed');
+        
+        // Identity Matching
+        handleFaceVerification(finalImage);
+      } else {
+        alert("🛑 Security Alert: AI detected a possible spoofing attempt. Please ensure you are a live person.");
+        setIsVerifyingFace(false);
+        setLivenessStatus('');
+      }
+    } catch (error) {
+      console.error("Liveness Error:", error);
+      alert("AI Server connection failed.");
+      setIsVerifyingFace(false);
+    }
+  };
+
+  // --- FACE VERIFICATION LOGIC ---
+  const handleFaceVerification = async (finalCapture) => {
+    const imageToVerify = finalCapture || webcamImage;
+    if (!imageToVerify || !userData?.imagePath) {
+        alert("Missing image data.");
+        setIsVerifyingFace(false);
+        return;
+    }
+
+    try {
+      const imagePathUrl = userData.imagePath.replace(/\\/g, '/');
+      const savedImageRes = await fetch(`http://localhost:5000/${imagePathUrl}`);
+      const savedImageBlob = await savedImageRes.blob();
+      const webcamBlob = dataURLtoBlob(imageToVerify);
+
+      const aiFormData = new FormData();
+      aiFormData.append('id_image', savedImageBlob, 'saved_id.jpg'); 
+      aiFormData.append('webcam_image', webcamBlob, 'login_selfie.jpg'); 
+
+      const aiRes = await axios.post('http://127.0.0.1:8000/verify', aiFormData);
+
+      if (aiRes.data.is_match) {
+        localStorage.setItem('voter', JSON.stringify(userData));
+        alert(`✅ Identity Confirmed! Welcome back, ${userData.name}!`);
+        navigate('/dashboard'); 
+      } else {
+        alert("❌ Access Denied: Face does not match registered record.");
+        setWebcamImage(null);
+        setShowWebcam(true);
+        setLivenessStatus('');
+      }
+    } catch (error) {
+      alert("AI Verification Error.");
+    } finally {
+      setIsVerifyingFace(false);
+    }
+  };
+
+  // (OTP and Password Reset functions remain unchanged...)
   const startResendTimer = () => {
     setResendTimer(30); 
     const interval = setInterval(() => {
       setResendTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
+        if (prev <= 1) { clearInterval(interval); return 0; }
         return prev - 1;
       });
     }, 1000);
@@ -48,20 +135,11 @@ function Login() {
 
   const handleResendOTP = async () => {
     try {
-      // We use the ID Number already entered in credentials
-      const res = await axios.post('http://localhost:5000/api/resend-otp', { 
-        aadhaarNumber: credentials.aadhaarNumber 
-      });
+      const res = await axios.post('http://localhost:5000/api/resend-otp', { aadhaarNumber: credentials.aadhaarNumber });
       alert(res.data.message);
       startResendTimer();
-    } catch (error) {
-      alert(error.response?.data?.message || "Error resending OTP.");
-    }
+    } catch (error) { alert("Error resending OTP."); }
   };
-
-  // ==========================================
-  //      NORMAL 3-STEP LOGIN LOGIC
-  // ==========================================
 
   const handleCredentialLogin = async (e) => {
     e.preventDefault(); 
@@ -72,9 +150,7 @@ function Login() {
       });
       alert(res.data.message); 
       setStep(2); 
-    } catch (error) {
-      alert(error.response?.data?.message || "Login failed.");
-    }
+    } catch (error) { alert("Login failed. Check credentials."); }
   };
 
   const handleVerifyOTP = async (e) => {
@@ -86,93 +162,36 @@ function Login() {
       });
       setUserData(res.data.user);
       setStep(3); 
-    } catch (error) {
-      alert(error.response?.data?.message || "Invalid OTP.");
-    }
+    } catch (error) { alert("Invalid OTP."); }
   };
-
-  // --- WEBCAM LOGIC ---
-  const captureSelfie = useCallback(() => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    setWebcamImage(imageSrc);
-    setShowWebcam(false); 
-  }, [webcamRef]);
-
-  const dataURLtoBlob = (dataurl) => {
-    let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
-        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
-    return new Blob([u8arr], {type:mime});
-  }
-
-  const handleFaceVerification = async () => {
-    if (!webcamImage || !userData?.imagePath) return alert("Missing image data.");
-    setIsVerifyingFace(true);
-    try {
-      const imagePathUrl = userData.imagePath.replace(/\\/g, '/');
-      const savedImageRes = await fetch(`http://localhost:5000/${imagePathUrl}`);
-      const savedImageBlob = await savedImageRes.blob();
-      const webcamBlob = dataURLtoBlob(webcamImage);
-
-      const aiFormData = new FormData();
-      aiFormData.append('id_image', savedImageBlob, 'saved_id.jpg'); 
-      aiFormData.append('webcam_image', webcamBlob, 'login_selfie.jpg'); 
-
-      const aiRes = await axios.post('http://127.0.0.1:8000/verify', aiFormData);
-
-      if (aiRes.data.is_match) {
-        localStorage.setItem('voter', JSON.stringify(userData));
-        alert(`✅ Identity Confirmed! Welcome, ${userData.name}!`);
-        navigate('/dashboard'); 
-      } else {
-        alert("❌ Face Match Failed.");
-        setWebcamImage(null);
-        setShowWebcam(true);
-      }
-    } catch (error) {
-      alert("AI Verification Error.");
-    } finally {
-      setIsVerifyingFace(false);
-    }
-  };
-
-  // ==========================================
-  //          FORGOT PASSWORD LOGIC
-  // ==========================================
 
   const handleForgotPasswordRequest = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/forgot-password', { 
-        aadhaarNumber: credentials.aadhaarNumber 
-      });
+      const res = await axios.post('http://localhost:5000/api/forgot-password', { aadhaarNumber: credentials.aadhaarNumber });
       alert(res.data.message);
       setResetStep(2); 
-    } catch (error) {
-      alert("Failed to send reset email.");
-    }
+    } catch (error) { alert("Account not found."); }
   };
 
   const handlePasswordReset = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/reset-password', {
+      await axios.post('http://localhost:5000/api/reset-password', {
         aadhaarNumber: credentials.aadhaarNumber,
         otp: credentials.otp,
         newPassword: newPassword
       });
-      alert(res.data.message);
+      alert("Password Updated Successfully!");
+      setCredentials({ ...credentials, password: '', otp: '' });
       setIsForgotPassword(false); 
       setResetStep(1);
-      setNewPassword('');
-    } catch (error) {
-      alert("Failed to reset password.");
-    }
+    } catch (error) { alert("Reset failed."); }
   };
 
   return (
     <div className="bg-login">
-      <div className="container" style={{ maxWidth: '450px' }}>
+      <div className="container" style={{ maxWidth: '450px', padding: '30px' }}>
         
         {isForgotPassword ? (
           <div>
@@ -184,17 +203,16 @@ function Login() {
                   <input type="text" name="aadhaarNumber" required value={credentials.aadhaarNumber} onChange={handleInputChange} />
                 </div>
                 <button type="submit" className="btn-primary" style={{ background: '#ff9800' }}>Send Recovery Code</button>
-                <p style={{marginTop: '20px', textAlign: 'center'}} onClick={() => setIsForgotPassword(false)}>Back to Login</p>
+                <p style={{marginTop: '20px', textAlign: 'center', cursor: 'pointer', textDecoration: 'underline'}} onClick={() => setIsForgotPassword(false)}>Back to Login</p>
               </form>
             ) : (
               <form onSubmit={handlePasswordReset}>
                 <div className="form-group">
-                  <label>Enter 6-Digit Code</label>
+                  <label>6-Digit Code</label>
                   <input type="text" name="otp" maxLength="6" required value={credentials.otp} onChange={handleInputChange} style={{ textAlign: 'center', fontSize: '24px' }} />
                 </div>
-                {/* --- RESEND OTP IN FORGOT PASSWORD --- */}
                 <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-                    <button type="button" onClick={handleResendOTP} disabled={resendTimer > 0} style={{ border: 'none', background: 'none', color: resendTimer > 0 ? 'gray' : 'blue', cursor: 'pointer' }}>
+                    <button type="button" onClick={handleResendOTP} disabled={resendTimer > 0} style={{ border: 'none', background: 'none', color: resendTimer > 0 ? 'gray' : '#007bff', cursor: 'pointer' }}>
                         {resendTimer > 0 ? `Resend in ${resendTimer}s` : "Resend Code"}
                     </button>
                 </div>
@@ -208,7 +226,9 @@ function Login() {
           </div>
         ) : (
           <div>
-            <h2>🔐 Voter Login</h2>
+            <h2 style={{ textAlign: 'center' }}>🔐 Voter Login</h2>
+            <hr style={{ margin: '20px 0', opacity: '0.1' }} />
+            
             {step === 1 && (
               <form onSubmit={handleCredentialLogin}>
                 <div className="form-group">
@@ -219,43 +239,58 @@ function Login() {
                   <label>Password</label>
                   <input type="password" name="password" required value={credentials.password} onChange={handleInputChange} />
                 </div>
-                <div style={{ textAlign: 'right', marginBottom: '15px' }} onClick={() => setIsForgotPassword(true)}>
-                  <span style={{ color: '#007bff', cursor: 'pointer', fontSize: '14px' }}>Forgot Password?</span>
+                <div style={{ textAlign: 'right', marginBottom: '15px' }}>
+                  <span style={{ color: '#007bff', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' }} onClick={() => setIsForgotPassword(true)}>Forgot Password?</span>
                 </div>
-                <button type="submit" className="btn-primary">Next Step: Verification</button>
+                <button type="submit" className="btn-primary" style={{ width: '100%' }}>Next: Identity Verification</button>
               </form>
             )}
 
             {step === 2 && (
               <form onSubmit={handleVerifyOTP}>
-                <h4 style={{textAlign: 'center'}}>Step 2: Email Verification</h4>
+                <h4 style={{textAlign: 'center'}}>Step 2: OTP Verification</h4>
                 <div className="form-group">
-                  <input type="text" name="otp" maxLength="6" required value={credentials.otp} onChange={handleInputChange} style={{ fontSize: '28px', textAlign: 'center', letterSpacing: '8px' }} />
+                  <input type="text" name="otp" maxLength="6" required value={credentials.otp} onChange={handleInputChange} style={{ fontSize: '28px', textAlign: 'center', letterSpacing: '8px', width: '100%' }} />
                 </div>
-                {/* --- RESEND OTP IN LOGIN --- */}
                 <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-                    <button type="button" onClick={handleResendOTP} disabled={resendTimer > 0} style={{ border: 'none', background: 'none', color: resendTimer > 0 ? 'gray' : 'blue', cursor: 'pointer' }}>
-                        {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : "Didn't get the code? Resend OTP"}
+                    <button type="button" onClick={handleResendOTP} disabled={resendTimer > 0} style={{ border: 'none', background: 'none', color: resendTimer > 0 ? 'gray' : '#007bff', cursor: 'pointer' }}>
+                        {resendTimer > 0 ? `Resend in ${resendTimer}s` : "Didn't get the code? Resend"}
                     </button>
                 </div>
-                <button type="submit" className="btn-primary" style={{ background: '#28a745' }}>Verify Code</button>
+                <button type="submit" className="btn-primary" style={{ background: '#28a745', width: '100%' }}>Verify OTP</button>
               </form>
             )}
 
             {step === 3 && (
               <div className="face-verification-step">
-                <h4 style={{textAlign: 'center'}}>Step 3: Live Face Scan</h4>
+                <h4 style={{textAlign: 'center'}}>Step 3: Biometric Security</h4>
                 {showWebcam ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" width="100%" />
-                    <button onClick={captureSelfie} style={{ marginTop: '15px', padding: '10px', background: 'green', color: 'white', width: '100%' }}>📸 Capture Selfie</button>
+                  <div style={{ textAlign: 'center' }}>
+                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" width="100%" style={{ borderRadius: '8px' }} />
+                    
+                    {livenessStatus && (
+                        <p style={{ margin: '10px 0', fontWeight: 'bold', color: livenessStatus.includes('✅') ? 'green' : '#007bff' }}>
+                            {livenessStatus}
+                        </p>
+                    )}
+
+                    <button 
+                        type="button"
+                        onClick={captureLivenessBurst} 
+                        disabled={isVerifyingFace}
+                        style={{ marginTop: '5px', padding: '12px', background: '#007bff', color: 'white', width: '100%', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+                    >
+                        {isVerifyingFace ? '🧠 Analyzing Texture (Stay Still)...' : '📸 Start AI Biometric Scan'}
+                    </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <img src={webcamImage} alt="Selfie" style={{ width: '100%', borderRadius: '8px' }} />
-                    <div style={{ display: 'flex', width: '100%', gap: '10px', marginTop: '15px' }}>
-                      <button onClick={() => { setWebcamImage(null); setShowWebcam(true); }} style={{ flex: 1 }}>Retake</button>
-                      <button onClick={handleFaceVerification} disabled={isVerifyingFace} style={{ flex: 2, background: '#007bff', color: 'white' }}>{isVerifyingFace ? '🧠 AI Comparing...' : '✅ Verify & Login'}</button>
+                  <div style={{ textAlign: 'center' }}>
+                    <img src={webcamImage} alt="Selfie" style={{ width: '100%', borderRadius: '8px', border: '3px solid #28a745' }} />
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                      <button type="button" onClick={() => { setWebcamImage(null); setShowWebcam(true); setLivenessStatus(''); }} style={{ flex: 1, padding: '10px' }}>Retake</button>
+                      <button type="button" onClick={() => handleFaceVerification()} disabled={isVerifyingFace} style={{ flex: 2, background: '#28a745', color: 'white', border: 'none', borderRadius: '4px' }}>
+                        {isVerifyingFace ? 'AI Matching...' : '✅ Confirm Identity'}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -269,277 +304,3 @@ function Login() {
 }
 
 export default Login;
-// client/src/pages/Login.js
-/*import React, { useState, useRef, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios'; 
-import Webcam from 'react-webcam'; 
-
-function Login() {
-  const navigate = useNavigate();
-  
-  // --- STATE MANAGEMENT: NORMAL LOGIN ---
-  const [resendTimer, setResendTimer] = useState(0);
-  const [step, setStep] = useState(1); // Step 1: Password, Step 2: OTP, Step 3: Face Match
-  const [userData, setUserData] = useState(null); 
-  const [credentials, setCredentials] = useState({
-    aadhaarNumber: '',
-    password: '',
-    otp: ''
-  });
-
-  // --- STATE MANAGEMENT: FORGOT PASSWORD ---
-  const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [resetStep, setResetStep] = useState(1); // 1: Enter ID, 2: Enter OTP & New Password
-  const [newPassword, setNewPassword] = useState('');
-
-  // --- WEBCAM STATE ---
-  const [showWebcam, setShowWebcam] = useState(true);
-  const [webcamImage, setWebcamImage] = useState(null);
-  const [isVerifyingFace, setIsVerifyingFace] = useState(false);
-  const webcamRef = useRef(null);
-
-  const handleInputChange = (e) => {
-    setCredentials({ ...credentials, [e.target.name]: e.target.value });
-  };
-
-  // ==========================================
-  //          NORMAL 3-STEP LOGIN LOGIC
-  // ==========================================
-
-  // --- STEP 1: VERIFY PASSWORD & SEND EMAIL ---
-  const handleCredentialLogin = async (e) => {
-    e.preventDefault(); 
-    try {
-      const res = await axios.post('http://localhost:5000/api/login', {
-        aadhaarNumber: credentials.aadhaarNumber,
-        password: credentials.password
-      });
-      alert(res.data.message); 
-      setStep(2); 
-    } catch (error) {
-      console.error("Login error:", error);
-      alert(error.response?.data?.message || "Login failed. Please try again.");
-    }
-  };
-
-  // --- STEP 2: VERIFY THE 6-DIGIT OTP ---
-  const handleVerifyOTP = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await axios.post('http://localhost:5000/api/verify-otp', {
-        aadhaarNumber: credentials.aadhaarNumber,
-        otp: credentials.otp
-      });
-      setUserData(res.data.user);
-      setStep(3); 
-    } catch (error) {
-      console.error("OTP Verification error:", error);
-      alert(error.response?.data?.message || "Invalid or expired OTP. Please try again.");
-    }
-  };
-
-  // --- WEBCAM CAPTURE LOGIC ---
-  const captureSelfie = useCallback(() => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    setWebcamImage(imageSrc);
-    setShowWebcam(false); 
-  }, [webcamRef]);
-
-  const dataURLtoBlob = (dataurl) => {
-    let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
-        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
-    return new Blob([u8arr], {type:mime});
-  }
-
-  // --- STEP 3: VERIFY FACE VIA PYTHON AI ---
-  const handleFaceVerification = async () => {
-    if (!webcamImage || !userData?.imagePath) {
-      alert("Missing image data. Please try again.");
-      return;
-    }
-    setIsVerifyingFace(true);
-
-    try {
-      const imagePathUrl = userData.imagePath.replace(/\\/g, '/');
-      const savedImageRes = await fetch(`http://localhost:5000/${imagePathUrl}`);
-      const savedImageBlob = await savedImageRes.blob();
-
-      const webcamBlob = dataURLtoBlob(webcamImage);
-      const aiFormData = new FormData();
-      aiFormData.append('id_image', savedImageBlob, 'saved_id.jpg'); 
-      aiFormData.append('webcam_image', webcamBlob, 'login_selfie.jpg'); 
-
-      const aiRes = await axios.post('http://127.0.0.1:8000/verify', aiFormData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-
-      if (aiRes.data.is_match) {
-        localStorage.setItem('voter', JSON.stringify(userData));
-        alert(`✅ Identity Confirmed! Welcome back, ${userData.name}!`);
-        navigate('/dashboard'); 
-      } else {
-        if (aiRes.data.error_type === "NO_FACE_FOUND") {
-             alert("🛑 No face detected! Please ensure your face is fully visible.");
-        } else {
-             alert("❌ Security Alert: The person in the camera does not match the registered account owner.");
-        }
-        setWebcamImage(null);
-        setShowWebcam(true);
-      }
-    } catch (error) {
-      console.error("AI Verification error:", error);
-      alert("Face verification failed to process. Check your Python server.");
-    } finally {
-      setIsVerifyingFace(false);
-    }
-  };
-
-  // ==========================================
-  //          FORGOT PASSWORD LOGIC
-  // ==========================================
-
-  const handleForgotPasswordRequest = async (e) => {
-    e.preventDefault();
-    if (!credentials.aadhaarNumber) return alert("Please enter your ID Number first.");
-    try {
-      const res = await axios.post('http://localhost:5000/api/forgot-password', { aadhaarNumber: credentials.aadhaarNumber });
-      alert(res.data.message);
-      setResetStep(2); 
-    } catch (error) {
-      alert(error.response?.data?.message || "Failed to send reset email.");
-    }
-  };
-
-  const handlePasswordReset = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await axios.post('http://localhost:5000/api/reset-password', {
-        aadhaarNumber: credentials.aadhaarNumber,
-        otp: credentials.otp,
-        newPassword: newPassword
-      });
-      alert(res.data.message);
-      // Reset UI back to normal login
-      setIsForgotPassword(false); 
-      setResetStep(1);
-      setNewPassword('');
-      setCredentials({ ...credentials, password: '', otp: '' });
-    } catch (error) {
-      alert(error.response?.data?.message || "Failed to reset password.");
-    }
-  };
-
-  // ==========================================
-  //                 UI RENDER
-  // ==========================================
-
-  return (
-    <div className="bg-login">
-      <div className="container" style={{ maxWidth: '450px' }}>
-        
-        {/* --- FORGOT PASSWORD VIEW --- *//*}
-        {isForgotPassword ? (
-          <div>
-            <h2>🔑 Reset Password</h2>
-            {resetStep === 1 ? (
-              <form onSubmit={handleForgotPasswordRequest}>
-                <p style={{ textAlign: 'center', marginBottom: '20px', color: '#555' }}>
-                  Enter your ID. We will send a recovery code to your registered email.
-                </p>
-                <div className="form-group">
-                  <label>ID Number</label>
-                  <input type="text" name="aadhaarNumber" placeholder="Enter your ID" required value={credentials.aadhaarNumber} onChange={handleInputChange} />
-                </div>
-                <button type="submit" className="btn-primary" style={{ background: '#ff9800', border: 'none' }}>Send Recovery Code</button>
-                <p style={{marginTop: '20px', textAlign: 'center'}}>
-                  <span style={{ color: '#007bff', cursor: 'pointer' }} onClick={() => setIsForgotPassword(false)}>Back to Login</span>
-                </p>
-              </form>
-            ) : (
-              <form onSubmit={handlePasswordReset}>
-                <div className="form-group">
-                  <label>Enter 6-Digit Code</label>
-                  <input type="text" name="otp" placeholder="------" maxLength="6" required value={credentials.otp} onChange={handleInputChange} style={{ fontSize: '24px', letterSpacing: '5px', textAlign: 'center' }} />
-                </div>
-                <div className="form-group">
-                  <label>New Password</label>
-                  <input type="password" placeholder="Enter secure new password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-                </div>
-                <button type="submit" className="btn-primary" style={{ background: '#28a745', border: 'none' }}>Save New Password</button>
-              </form>
-            )}
-          </div>
-        ) : (
-          /* --- NORMAL LOGIN VIEW --- */
-          /*<div>
-            <h2>🔐 Voter Login</h2>
-            
-            {step === 1 && (
-              <form onSubmit={handleCredentialLogin}>
-                <div className="form-group">
-                  <label>ID Number</label>
-                  <input type="text" name="aadhaarNumber" placeholder="Enter your ID" required value={credentials.aadhaarNumber} onChange={handleInputChange} />
-                </div>
-                <div className="form-group">
-                  <label>Password</label>
-                  <input type="password" name="password" placeholder="Enter password" required value={credentials.password} onChange={handleInputChange} />
-                </div>
-                
-                {/* FORGOT PASSWORD LINK *//*}
-                <div style={{ textAlign: 'right', marginBottom: '15px' }}>
-                  <span style={{ color: '#007bff', cursor: 'pointer', fontSize: '14px', textDecoration: 'underline' }} onClick={() => setIsForgotPassword(true)}>
-                    Forgot Password?
-                  </span>
-                </div>
-
-                <button type="submit" className="btn-primary">Next Step: Verification</button>
-              </form>
-            )}
-
-            {step === 2 && (
-              <form onSubmit={handleVerifyOTP}>
-                <h4 style={{textAlign: 'center', marginBottom: '15px', color: '#333'}}>Step 2: Email Verification</h4>
-                <div className="form-group">
-                  <label style={{ color: '#28a745', fontWeight: 'bold', textAlign: 'center', display: 'block' }}>Enter the 6-digit code sent to your email</label>
-                  <input type="text" name="otp" placeholder="------" maxLength="6" required value={credentials.otp} onChange={handleInputChange} style={{ fontSize: '28px', letterSpacing: '8px', textAlign: 'center', marginTop: '10px' }} />
-                </div>
-                <button type="submit" className="btn-primary" style={{ background: '#28a745', border: 'none' }}>Verify Code</button>
-              </form>
-            )}
-
-            {step === 3 && (
-              <div className="face-verification-step">
-                <h4 style={{textAlign: 'center', marginBottom: '15px', color: '#333'}}>Step 3: Live Face Scan</h4>
-                {showWebcam && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" width="100%" style={{ borderRadius: '8px', border: '2px solid #ccc' }} />
-                    <button onClick={captureSelfie} style={{ marginTop: '15px', padding: '10px 20px', background: 'green', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', width: '100%', fontWeight: 'bold' }}>📸 Capture Login Selfie</button>
-                  </div>
-                )}
-                {webcamImage && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <img src={webcamImage} alt="Selfie" style={{ width: '100%', borderRadius: '8px', border: '3px solid #007bff' }} />
-                    <div style={{ display: 'flex', width: '100%', gap: '10px', marginTop: '15px' }}>
-                      <button onClick={() => { setWebcamImage(null); setShowWebcam(true); }} style={{ flex: 1, padding: '10px', background: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Retake</button>
-                      <button onClick={handleFaceVerification} disabled={isVerifyingFace} style={{ flex: 2, padding: '10px', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>{isVerifyingFace ? '🧠 AI Comparing...' : '✅ Verify & Login'}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {step === 1 && (
-              <p style={{marginTop: '20px', textAlign: 'center'}}>
-                Don't have an account? <Link to="/register">Sign Up here</Link>
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export default Login;*/

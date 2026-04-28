@@ -1,5 +1,4 @@
-// client/src/pages/Register.js
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import axios from 'axios'; 
 import Tesseract from 'tesseract.js';
 import Webcam from 'react-webcam'; 
@@ -17,74 +16,68 @@ function Register() {
   const [preview, setPreview] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
-
   const [showWebcam, setShowWebcam] = useState(false);
   const [webcamImage, setWebcamImage] = useState(null);
   const webcamRef = useRef(null);
 
+  // Cleanup preview URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (preview) URL.revokeObjectURL(preview); // Clean up old preview
       setFormData({ ...formData, image: file });
       setPreview(URL.createObjectURL(file));
-
       setIsScanning(true);
-      setScanProgress('Initializing Edge AI...');
+      setScanProgress('Initializing AI Scan...');
 
       try {
-        const result = await Tesseract.recognize(
-          file,
-          'eng',
-          {
-            logger: m => {
-              if (m.status === 'recognizing text') {
-                setScanProgress(`AI Scanning: ${Math.round(m.progress * 100)}%`);
-              }
+        const result = await Tesseract.recognize(file, 'eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              setScanProgress(`AI Scanning: ${Math.round(m.progress * 100)}%`);
             }
           }
-        );
+        });
 
         const extractedText = result.data.text;
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
         let extractedName = "";
 
+        // Improved Name Logic
         for (let i = 0; i < lines.length; i++) {
-          const currentLine = lines[i];
-          if (currentLine.match(/\d{2}[/-]\d{2}[/-]\d{4}/) || currentLine.toUpperCase().includes("DOB")) {
+          if (lines[i].match(/\d{2}[/-]\d{2}[/-]\d{4}/) || lines[i].toUpperCase().includes("DOB")) {
             if (i > 0) {
               let possibleName = lines[i - 1];
               if (/[a-zA-Z]/.test(possibleName) && !possibleName.toLowerCase().includes("government")) {
                 extractedName = possibleName.replace(/[^a-zA-Z\s]/g, "").trim(); 
-              } else if (i > 1) {
-                let alternateName = lines[i - 2];
-                extractedName = alternateName.replace(/[^a-zA-Z\s]/g, "").trim();
               }
             }
             break; 
           }
         }
 
-        const aadhaarRegex = /\b(\d{4})[\s-]?(\d{4})[\s-]?(\d{4})\b/;
-        const aadhaarMatch = extractedText.match(aadhaarRegex);
+        // Improved Regex for 12-digit ID
+        const idRegex = /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/;
+        const idMatch = extractedText.match(idRegex);
         const dobRegex = /\b(\d{2})\/(\d{2})\/(\d{4})\b/;
         const dobMatch = extractedText.match(dobRegex);
 
-        let updatedData = { ...formData, image: file };
+        let updatedData = { ...formData };
         if (extractedName) updatedData.name = extractedName;
-        if (aadhaarMatch) updatedData.aadhaarNumber = aadhaarMatch[1] + aadhaarMatch[2] + aadhaarMatch[3];
+        // Clean the ID of any spaces or dashes
+        if (idMatch) updatedData.aadhaarNumber = idMatch[0].replace(/[^0-9]/g, "");
         if (dobMatch) updatedData.dob = `${dobMatch[3]}-${dobMatch[2]}-${dobMatch[1]}`;
 
         setFormData(updatedData);
-
-        if (aadhaarMatch || dobMatch || extractedName) {
-          alert("✅ AI successfully extracted your details!");
-        } else {
-          alert("⚠️ AI could not read the card clearly. Please type your details manually.");
-        }
-
+        alert(idMatch || dobMatch || extractedName ? "✅ Details extracted!" : "⚠️ AI Scan incomplete. Please verify details.");
       } catch (error) {
-        console.error("OCR Engine Error:", error);
-        alert("OCR failed. Please enter details manually.");
+        alert("OCR failed. Enter details manually.");
       } finally {
         setIsScanning(false);
         setScanProgress('');
@@ -105,45 +98,23 @@ function Register() {
   const dataURLtoBlob = (dataurl) => {
     let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
         bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-    while(n--){
-        u8arr[n] = bstr.charCodeAt(n);
-    }
+    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
     return new Blob([u8arr], {type:mime});
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (!webcamImage) {
-        alert("🛑 Security Error: You must capture a live face scan to register.");
-        return;
-    }
-
-    const aadhaarRegex = /^\d{12}$/;
-    if (!aadhaarRegex.test(formData.aadhaarNumber)) {
-      alert("❌ Invalid Input: ID Number must be exactly 12 digits.");
-      return; 
-    }
-
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(formData.password)) {
-      alert("🔒 Weak Password: Your password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.");
-      return; 
-    }
-
+    if (!webcamImage) return alert("🛑 Capture a live face scan to register.");
+    if (!/^\d{12}$/.test(formData.aadhaarNumber)) return alert("❌ ID Number must be 12 digits.");
+    
+    // Eligibility Check
     const dobDate = new Date(formData.dob);
     const today = new Date();
     let age = today.getFullYear() - dobDate.getFullYear();
-    const monthDifference = today.getMonth() - dobDate.getMonth();
+    const m = today.getMonth() - dobDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dobDate.getDate())) age--;
     
-    if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < dobDate.getDate())) {
-      age--;
-    }
-
-    if (age < 18) {
-      alert("🛑 Eligibility Error: You must be at least 18 years old to register to vote.");
-      return; 
-    }
+    if (age < 18) return alert("🛑 Eligibility Error: You must be 18+ to register.");
 
     const dataToSend = new FormData();
     dataToSend.append('name', formData.name);
@@ -151,8 +122,6 @@ function Register() {
     dataToSend.append('dob', formData.dob);
     dataToSend.append('password', formData.password);
     dataToSend.append('email', formData.email); 
-    
-    // 🔥 PIVOT: Sending the high-quality webcam selfie as the primary biometric record
     dataToSend.append('registrationFace', dataURLtoBlob(webcamImage), 'golden_face.jpg'); 
 
     try {
@@ -161,106 +130,82 @@ function Register() {
       });
       alert(`Success! ${res.data.message}`);
     } catch (error) {
-      console.error("Error registering:", error);
-      alert("Registration failed. " + (error.response?.data?.message || "Check your server."));
+      alert("Registration failed. " + (error.response?.data?.message || "Check server connection."));
     }
   };
 
   return (
     <div className="bg-register">
-      <div className="container">
-        <h2>Voter Registration</h2>
+      <div className="container" style={{ maxWidth: '550px', padding: '30px' }}>
+        <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>🗳️ Voter Registration</h2>
         <form onSubmit={handleSubmit}>
           
-          <div className="form-group">
-            <label>1. Upload ID Card (AI Scan)</label>
-            <div className="upload-box">
-              <input 
-                type="file" 
-                id="file-upload" 
-                accept="image/*"
-                style={{ display: 'none' }} 
-                onChange={handleImageUpload}
-              />
-              <label htmlFor="file-upload" className="upload-label">
+          <div className="form-group" style={{ marginBottom: '20px' }}>
+            <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>1. Upload ID Card (AI Scan)</label>
+            <div className="upload-box" style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center', borderRadius: '8px' }}>
+              <input type="file" id="file-upload" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+              <label htmlFor="file-upload" style={{ cursor: 'pointer', display: 'block' }}>
                 {preview ? (
-                  <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: '150px', objectFit: 'contain', opacity: isScanning ? 0.5 : 1 }} />
+                  <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: '150px', objectFit: 'contain' }} />
                 ) : (
-                  "📂 Click to Upload ID"
+                  <div style={{ padding: '20px', color: '#666' }}>📂 Click to Upload ID Card</div>
                 )}
               </label>
-              
-              {isScanning && (
-                <div style={{ marginTop: '10px', color: '#007bff', fontWeight: 'bold' }}>
-                  🔄 {scanProgress}
+              {isScanning && <div style={{ color: '#007bff', marginTop: '10px', fontWeight: 'bold' }}>🔄 {scanProgress}</div>}
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '25px' }}>
+            <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>2. Live Face Capture</label>
+            <div style={{ textAlign: 'center' }}>
+              {!showWebcam && !webcamImage && (
+                <button type="button" onClick={() => setShowWebcam(true)} className="btn-secondary" style={{ width: '100%' }}>📷 Open Camera</button>
+              )}
+              {showWebcam && (
+                <div>
+                  <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" width="100%" style={{ borderRadius: '8px', border: '1px solid #ddd' }} />
+                  <button type="button" onClick={captureSelfie} className="btn-primary" style={{ marginTop: '10px', background: '#28a745' }}>📸 Capture Registration Photo</button>
+                </div>
+              )}
+              {webcamImage && (
+                <div>
+                  <img src={webcamImage} alt="Selfie" style={{ width: '150px', borderRadius: '8px', border: '3px solid #28a745' }} />
+                  <button type="button" onClick={() => { setWebcamImage(null); setShowWebcam(true); }} className="btn-danger" style={{ display: 'block', margin: '10px auto', padding: '5px 15px' }}>Retake Photo</button>
                 </div>
               )}
             </div>
           </div>
 
-          <div className="form-group">
-            <label>2. Live Face Capture (For Biometric ID)</label>
-            
-            {!showWebcam && !webcamImage && (
-              <button type="button" onClick={() => setShowWebcam(true)} style={{ padding: '8px 12px', background: '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                📷 Open Camera
-              </button>
-            )}
-
-            {showWebcam && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '10px' }}>
-                <Webcam
-                  audio={false}
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg"
-                  width="100%"
-                  style={{ borderRadius: '8px', border: '2px solid #ccc' }}
-                />
-                <button type="button" onClick={captureSelfie} style={{ marginTop: '10px', padding: '8px 16px', background: 'green', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  📸 Capture Registration Selfie
-                </button>
-              </div>
-            )}
-
-            {webcamImage && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '10px' }}>
-                <img src={webcamImage} alt="Selfie" style={{ width: '150px', borderRadius: '8px', border: '2px solid #4CAF50' }} />
-                <button type="button" onClick={() => { setWebcamImage(null); setShowWebcam(true); }} style={{ marginTop: '5px', padding: '5px 10px', background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  Retake Photo
-                </button>
-              </div>
-            )}
-          </div>
-
-          <hr style={{ margin: '20px 0', borderColor: '#eee' }} />
+          <hr style={{ margin: '25px 0', opacity: '0.1' }} />
 
           <div className="form-group">
             <label>Full Name</label>
-            <input type="text" name="name" placeholder="Your Name" required value={formData.name} onChange={handleInputChange} />
+            <input type="text" name="name" className="form-control" placeholder="Extracted from ID" required value={formData.name} onChange={handleInputChange} />
           </div>
 
           <div className="form-group">
             <label>Email Address</label>
-            <input type="email" name="email" placeholder="Your actual email (for OTP)" required value={formData.email} onChange={handleInputChange} />
+            <input type="email" name="email" className="form-control" placeholder="voter@example.com" required value={formData.email} onChange={handleInputChange} />
           </div>
 
           <div className="form-group">
-            <label>ID Number</label>
-            <input type="text" name="aadhaarNumber" placeholder="XXXX-XXXX-XXXX" required value={formData.aadhaarNumber} onChange={handleInputChange} />
+            <label>12-Digit ID Number</label>
+            <input type="text" name="aadhaarNumber" className="form-control" placeholder="XXXX XXXX XXXX" required value={formData.aadhaarNumber} onChange={handleInputChange} />
           </div>
 
-          <div className="form-group">
-            <label>Date of Birth</label>
-            <input type="date" name="dob" required value={formData.dob} onChange={handleInputChange} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div className="form-group">
+              <label>Date of Birth</label>
+              <input type="date" name="dob" className="form-control" required value={formData.dob} onChange={handleInputChange} />
+            </div>
+            <div className="form-group">
+              <label>Secure Password</label>
+              <input type="password" name="password" className="form-control" placeholder="Min 8 chars" required minLength="8" value={formData.password} onChange={handleInputChange} />
+            </div>
           </div>
 
-          <div className="form-group">
-            <label>Create Password</label>
-            <input type="password" name="password" placeholder="Create a secure password" required value={formData.password} onChange={handleInputChange} />
-          </div>
-
-          <button type="submit" className="btn-primary" disabled={isScanning || !webcamImage}>
-            {isScanning ? 'AI Processing...' : 'Register Voter'}
+          <button type="submit" className="btn-primary" disabled={isScanning || !webcamImage} style={{ width: '100%', marginTop: '25px', height: '50px' }}>
+            {isScanning ? '🧠 AI Processing...' : 'Complete Registration'}
           </button>
         </form>
       </div>
